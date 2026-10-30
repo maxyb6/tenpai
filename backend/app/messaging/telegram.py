@@ -25,7 +25,8 @@ def live() -> bool:
 
 
 def call(method: str, **params) -> dict:
-    r = httpx.post(API.format(token=TELEGRAM_BOT_TOKEN, method=method), json=params, timeout=15)
+    r = httpx.post(API.format(token=TELEGRAM_BOT_TOKEN, method=method), json=params,
+                   timeout=params.get("timeout", 0) + 15)
     r.raise_for_status()
     return r.json()
 

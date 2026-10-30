@@ -62,7 +62,9 @@ def reset_tenant(session: Session, tenant_id: str) -> None:
         raise PermissionError("only demo tenants can be reset")
     session.execute(text("SET LOCAL tenpai.allow_demo_reset = 'on'"))
     batch_ids = select(PostingBatch.id).where(PostingBatch.tenant_id == tenant_id)
-    session.execute(delete(PostingBatchRow).where(PostingBatchRow.batch_id.in_(batch_ids)))
+    payment_ids = select(Payment.id).where(Payment.tenant_id == tenant_id)
+    session.execute(delete(PostingBatchRow).where(
+        PostingBatchRow.batch_id.in_(batch_ids) | PostingBatchRow.payment_id.in_(payment_ids)))
     for model in TENANT_TABLES[:8]:
         session.execute(delete(model).where(model.tenant_id == tenant_id))
     session.execute(delete(PostingBatch).where(PostingBatch.tenant_id == tenant_id))
@@ -159,3 +161,30 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
                                                                             Case.status == "open"))
     return {"tenant": tenant.id, "as_of": as_of.isoformat(), "files": {k: str(p) for k, p in paths.items()},
             "import": result}
+
+
+def seed_empty_tenant(session: Session, market: str, as_of: date) -> dict:
+    """A demo tenant with the lender's brand, policy and scripts but no book:
+    what a lender sees before their first import (the free health check)."""
+    cfg = generator.TENANTS[market]
+    tid = cfg["id"].replace("-demo", "-new")
+    reset_tenant(session, tid)
+    tz = ZoneInfo(cfg["timezone"])
+    now = datetime(as_of.year, as_of.month, as_of.day, 9, 30, tzinfo=tz)
+    tenant = Tenant(id=tid, name=cfg["name"].replace("(Sample)", "(Sample, first import)"), market=market,
+                    timezone=cfg["timezone"], reporting_currency=cfg["reporting_currency"], brand=cfg["brand"],
+                    fx=cfg["fx"], is_demo=True, demo_now=now, current_policy_version=0,
+                    data_region_note=DATA_HOSTING_REGION)
+    session.add(tenant)
+    session.flush()
+    policy_mod.save_new_version(session, tenant, policy_mod.default_policy(market), actor="system:seed", at=now,
+                                note="Default policy")
+    world_users = generator.generate(market, as_of).users
+    hoc = next(u for u in world_users if u["role"] == "head_of_collections")
+    session.add(User(tenant_id=tid, name=hoc["name"], email=hoc["email"], role="head_of_collections"))
+    for u in world_users:
+        if u["role"] == "leadership":
+            session.add(User(tenant_id=tid, name=u["name"], email=u["email"], role="leadership"))
+    seed_templates(session, tenant, now, approver=f"{hoc['name']} (sample approver)")
+    session.flush()
+    return {"tenant": tid}

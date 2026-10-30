@@ -124,7 +124,21 @@ def compute(session: Session, tenant: Tenant, weeks: int = 8) -> dict:
         "months": round(months, 2), "platform_fee": platform, "success_fee_pct": fee_cfg.get("success_fee_pct", 0),
         "success_fee": success, "total": platform + success, "currency": rep,
     }
+    # Is the difference real yet? 95% interval on the cure-rate difference.
+    import math
+
+    def diff_ci(p1, n1, p2, n2):
+        if not n1 or not n2 or p1 is None or p2 is None:
+            return None
+        se = math.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2)
+        d = p1 - p2
+        return {"diff": round(d, 4), "low": round(d - 1.96 * se, 4), "high": round(d + 1.96 * se, 4),
+                "conclusive": d - 1.96 * se > 0 or d + 1.96 * se < 0}
+
+    significance = {"cure_rate": diff_ci(t["cure_rate"], t["cases"], c["cure_rate"], c["cases"]),
+                    "control_cases": c["cases"], "treatment_cases": t["cases"]}
     return {
+        "significance": significance,
         "simulated": tenant.is_demo, "window_start": start.isoformat(), "as_of": now.isoformat(),
         "reporting_currency": rep, "policy_version": version,
         "by_arm": by_arm, "by_bucket": by_bucket, "par_trend": trend, "cost": cost, "fee": fee,

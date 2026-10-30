@@ -138,9 +138,45 @@ def simulate_payment(body: PayBody, c: Ctx = Depends(ctx)):
 @router.post("/reset")
 def reset(c: Ctx = Depends(ctx), as_of: date | None = None):
     _demo_only(c)
-    from app.seed.loader import seed_tenant
+    from app.seed.loader import seed_empty_tenant, seed_tenant
 
     market, as_of = c.tenant.market, as_of or clock.today(c.tenant)
     c.session.rollback()
+    if c.tenant.id.endswith("-new"):
+        return {"ok": True, **seed_empty_tenant(c.session, market, as_of)}
     out = seed_tenant(c.session, market, as_of, write_sample=False)
     return {"ok": True, "tenant": out["tenant"], "as_of": out["as_of"]}
+
+
+@router.get("/suggested-case")
+def suggested_case(c: Ctx = Depends(ctx), income_factor: float = 0.85):
+    """A Nudge case for the scripted demo: on Telegram, treatment, untouched, and
+    where answering "income fell to 85%" yields an affordable plan that needs
+    approval. Computed without writing anything."""
+    from app import policy as policy_mod
+    from app.domain import plans as plans_mod
+    from app.models import Schedule, TelegramLink
+
+    s, t = c.session, c.tenant
+    _, policy = policy_mod.current(s, t)
+    today = clock.today(t)
+    linked = select(TelegramLink.borrower_id).where(TelegramLink.tenant_id == t.id, TelegramLink.status == "active")
+    candidates = s.scalars(select(Case).where(
+        Case.tenant_id == t.id, Case.status == "open", Case.arm == "treatment", Case.segment == "nudge",
+        Case.automation_paused.is_(False), Case.borrower_id.in_(linked),
+        Case.state.in_(("new", "contacting"))).order_by(Case.priority.desc()))
+    for case in candidates:
+        loan = s.get(Loan, case.loan_id)
+        if not loan.appraisal:
+            continue
+        answers = {"income_changed": "less",
+                   "income_now": int(round(loan.appraisal["household_income"] * income_factor, -4))}
+        cap = plans_mod.capacity_for(s, t, loan, s.get(Borrower, case.borrower_id), answers, policy)
+        future = list(s.scalars(select(Schedule).where(
+            Schedule.loan_id == loan.id, Schedule.version == 1, Schedule.due_date >= today,
+            Schedule.paid_amount < Schedule.total_due).order_by(Schedule.instalment_no)))
+        opts = plans_mod.generate_options(loan, future, today, plans_mod.per_period(cap["monthly_capacity"],
+                                                                                    loan.frequency), policy)
+        if any(o["affordable"] and not o["within_policy"] for o in opts) and sum(o["affordable"] for o in opts) >= 2:
+            return {"case_id": case.id, "income_now": answers["income_now"], "currency": loan.currency}
+    raise HTTPException(404, "no suitable case")

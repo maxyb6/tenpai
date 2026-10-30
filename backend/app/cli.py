@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from datetime import datetime
 
 from app.db import session_scope
-from app.seed.loader import seed_tenant
+from app.seed.loader import seed_empty_tenant, seed_tenant
 
 
 def main():
@@ -33,6 +33,9 @@ def main():
                 if b:
                     print(f"  {kind} file: {b['rows']} rows, {b['accepted']} loaded")
             print(f"  cases: {json.dumps(out['import']['cases'])}")
+            if market == "MM":
+                with session_scope() as session:
+                    print(f"[{market}] empty tenant for the first-import demo: {seed_empty_tenant(session, market, as_of)}")
 
 
 if __name__ == "__main__":

@@ -124,7 +124,7 @@ class Replay:
                 # The lender's existing process: officers visit overdue borrowers weekly.
                 case_svc.assign_visit(self.s, self.t, case, actor="system:existing_process",
                                       for_date=d + timedelta(days=1), notify=False)
-                info["next_visit"] = d + timedelta(days=7)
+                info["next_visit"] = d + timedelta(days=10)
 
     def cure(self, case: Case, info: dict, d: date):
         if case.arm == "treatment" and info["linked"] and info["pay_via_app"] and case.state != "sensitive":
@@ -237,6 +237,39 @@ class Replay:
             field_svc.record_outcome(self.s, self.t, v, outcome=outcome, actor=f"officer:{v.officer_id}",
                                      notes="Simulated visit", promise_amount=amount if outcome == "promised" else None,
                                      promise_date=due if outcome == "promised" else None)
+        # Managers review flags and close complaints, mostly within SLA.
+        from app.models import Complaint, Flag
+
+        mgr_any = next(iter(self.managers.values()), None)
+        for f in self.s.scalars(select(Flag).where(Flag.tenant_id == self.t.id, Flag.reviewed_at.is_(None),
+                                                   Flag.raised_at < when - timedelta(days=2))):
+            if self.rng.random() < 0.85:
+                case = self.s.get(Case, f.case_id) if f.case_id else None
+                mgr = self.managers.get(case.branch_id) if case else mgr_any
+                resume = self.rng.random() < 0.35
+                f.reviewer_user_id, f.reviewed_at = (mgr.id if mgr else None), when
+                f.outcome = "Reviewed; safe to resume" if resume else "Confirmed; keep paused, manager owns case"
+                emit(self.s, tenant_id=self.t.id, type=EventType.flag_reviewed, at=when, actor=f"user:{mgr.id if mgr else 0}",
+                     policy_version=self.version, case_id=f.case_id, borrower_id=f.borrower_id,
+                     payload={"flag_id": f.id, "outcome": f.outcome, "resume": resume, "simulated": True})
+                if resume and case is not None:
+                    f.active = False
+                    case.automation_paused, case.pause_reason = False, None
+        for x in self.s.scalars(select(Complaint).where(Complaint.tenant_id == self.t.id, Complaint.status == "open",
+                                                        Complaint.opened_at < when - timedelta(hours=20))):
+            if self.rng.random() < 0.8:
+                x.status, x.resolution, x.closed_at = "closed", "Called borrower; officer briefed (simulated)", when
+                emit(self.s, tenant_id=self.t.id, type=EventType.complaint_closed, at=when, actor="system:sim",
+                     policy_version=self.version, case_id=x.case_id, borrower_id=x.borrower_id,
+                     payload={"complaint_id": x.id, "within_sla": when <= x.sla_due_at, "simulated": True})
+        # Weekly posting file for last week's matched payments.
+        if d.weekday() == 0:
+            from app.payments import posting
+
+            try:
+                posting.create_batch(self.s, self.t, d - timedelta(days=7), d - timedelta(days=1), "system:sim")
+            except posting.NothingToExport:
+                pass
         # Borrowers read most delivered messages within a day or so.
         from app.models import Message
 

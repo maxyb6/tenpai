@@ -132,7 +132,8 @@ export default function Phone({ account, onChange }: { account: any; onChange: (
           <option value="">Borrower replies…</option>
           {replies.map((r) => <option key={r.text} value={r.text}>{r.en} · {r.text}</option>)}
         </select>
-        <button className="btn w-full justify-center" disabled={busy} onClick={pay}>Simulate payment of arrears</button>
+        <button className="btn w-full justify-center" disabled={busy} onClick={pay}>Simulate payment due now</button>
+        <OptIn caseId={account.case.id} />
         {note && <div className="text-[11px]">{note}</div>}
       </div>
     </div>
@@ -147,5 +148,17 @@ function ReplyBox({ onSend, disabled }: { onSend: (t: string) => void; disabled:
         disabled={disabled} value={text} onChange={(e) => setText(e.target.value)} />
       <button className="rounded-full bg-green-slate px-3 text-[12px] text-white" disabled={disabled}>Send</button>
     </form>
+  );
+}
+
+function OptIn({ caseId }: { caseId: number }) {
+  const [d, setD] = useState<any>();
+  if (!d) return <button className="btn w-full justify-center" onClick={() => api.get(`/cases/${caseId}/optin`).then(setD)}>Telegram opt-in QR</button>;
+  return (
+    <div className="rounded bg-white p-2 text-center text-[11px]">
+      <img alt="opt-in QR" className="mx-auto w-32" src={`data:image/png;base64,${d.qr_png}`} />
+      <a className="break-all underline" href={d.url} target="_blank" rel="noreferrer">{d.url}</a>
+      <div className="mt-1 text-slate/60">{d.live ? "Live bot: scan with a real phone to link it to this borrower." : "Set TELEGRAM_BOT_TOKEN to link a real phone."}</div>
+    </div>
   );
 }

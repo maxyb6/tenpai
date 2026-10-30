@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { dateTime, ROLE_LABEL } from "../format";
 import { useApp } from "../state";
@@ -91,6 +91,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
       </div>
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <select className="input" value={tenant} onChange={(e) => setTenant(e.target.value)} title="Lender (tenant)">
+          <option value="mm-new">Myanmar: first import (empty)</option>
           <option value="mm-demo">Myanmar demo</option>
           <option value="kh-demo">Cambodia demo</option>
         </select>
@@ -128,6 +129,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 
 function DemoMenu() {
   const { refresh, meta } = useApp();
+  const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string>();
   const [note, setNote] = useState<string>();
@@ -144,7 +146,7 @@ function DemoMenu() {
       if (out?.runs) {
         const r = out.runs[out.runs.length - 1];
         setNote(`Day run: ${r.reminders} reminders, ${r.invites} invites, ${r.visits_assigned} visits, ${r.promises_broken} promises broken`);
-      } else setNote(`${label}: done`);
+      } else if (!out?.keepNote) setNote(`${label}: done`);
       refresh();
     } catch (e: any) {
       setNote(`${label} failed: ${e.message}`);
@@ -177,10 +179,22 @@ function DemoMenu() {
           ))}
           <button
             disabled={!!busy}
+            className="block w-full rounded px-2 py-1.5 text-left hover:bg-bg"
+            onClick={() => run("Open the demo borrower", async () => {
+              const r = await api.get<any>("/demo/suggested-case");
+              setNote(`Demo borrower: in the Mini App answer "less", income ${r.income_now.toLocaleString()} ${r.currency}`);
+              nav(`/cases/${r.case_id}`);
+              return { keepNote: true };
+            })}
+          >
+            Open the demo borrower
+          </button>
+          <button
+            disabled={!!busy}
             className="mt-1 block w-full rounded px-2 py-1.5 text-left text-danger hover:bg-danger-soft"
             onClick={() => confirm("Reset the demo tenant to fresh sample data?") && run("Reset demo tenant", () => api.post("/demo/reset"))}
           >
-            {busy === "Reset demo tenant" ? "Resetting (about 30s)…" : "Reset demo tenant"}
+            {busy === "Reset demo tenant" ? "Resetting with 8 weeks of history (about 2 min)…" : "Reset demo tenant"}
           </button>
           <div className="mt-1 border-t border-sage-pale px-1 pt-1 text-[11px] text-slate/60">
             Borrower replies and payments: open a borrower and use the phone panel.

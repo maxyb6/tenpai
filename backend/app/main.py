@@ -13,6 +13,13 @@ for r in (portfolio.router, portfolio.sample_router, cases.router, mini.router, 
     app.include_router(r)
 
 
+@app.on_event("startup")
+def _start_bot():
+    from app.messaging import bot
+
+    bot.start()
+
+
 @app.get("/api/health")
 def health(session: Session = Depends(get_session)):
     session.execute(select(1))

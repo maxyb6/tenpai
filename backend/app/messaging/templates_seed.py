@@ -30,6 +30,8 @@ CATALOGUE = {
     "complaint_received": ("transactional", ["complaint_ref", "lender_name", "sla_hours"]),
     "opt_out_confirmation": ("transactional", ["lender_name", "lender_phone"]),
     "telegram_invite": ("invite", ["lender_name", "invite_link"]),
+    "optin_request": ("transactional", ["lender_name"]),
+    "optin_done": ("transactional", ["borrower_name", "lender_name"]),
 }
 
 EN = {
@@ -48,6 +50,8 @@ EN = {
     "complaint_received": "We have received your complaint (reference {complaint_ref}). A manager from {lender_name} will contact you within {sla_hours} hours.",
     "opt_out_confirmation": "You will no longer receive messages from {lender_name} on Telegram. To contact us, call {lender_phone} or speak to your loan officer.",
     "telegram_invite": "{lender_name}: check your loan balance and pay on Telegram. Tap to connect: {invite_link}",
+    "optin_request": "Welcome to {lender_name}. To connect your loan, tap the button below to share your phone number. We will only message you about your own loan, between 8am and 7pm.",
+    "optin_done": "Thank you, {borrower_name}. Your loan with {lender_name} is now connected. You can see your balance and pay here at any time.",
 }
 
 MY = {
@@ -66,6 +70,8 @@ MY = {
     "complaint_received": "သင်၏ တိုင်ကြားချက်ကို လက်ခံရရှိပါသည် (ရည်ညွှန်းနံပါတ် {complaint_ref})။ {lender_name} မှ မန်နေဂျာတစ်ဦးသည် {sla_hours} နာရီအတွင်း သင့်ထံ ဆက်သွယ်ပါမည်။",
     "opt_out_confirmation": "{lender_name} ထံမှ Telegram တွင် စာများ ထပ်မံပေးပို့တော့မည် မဟုတ်ပါ။ ဆက်သွယ်လိုပါက {lender_phone} သို့ ဖုန်းခေါ်ဆိုပါ သို့မဟုတ် သင်၏ ချေးငွေအရာရှိနှင့် ပြောဆိုပါ။",
     "telegram_invite": "{lender_name} - ချေးငွေလက်ကျန် ကြည့်ရန်နှင့် ပေးချေရန် Telegram တွင် ချိတ်ဆက်ပါ - {invite_link}",
+    "optin_request": "{lender_name} မှ ကြိုဆိုပါသည်။ သင်၏ ချေးငွေကို ချိတ်ဆက်ရန် အောက်ပါခလုတ်ကို နှိပ်၍ ဖုန်းနံပါတ်ကို မျှဝေပါ။ သင်၏ ချေးငွေအကြောင်းကိုသာ နံနက် ၈ နာရီမှ ညနေ ၇ နာရီအတွင်း ဆက်သွယ်ပါမည်။",
+    "optin_done": "ကျေးဇူးတင်ပါသည် {borrower_name}။ {lender_name} ရှိ သင်၏ ချေးငွေကို ချိတ်ဆက်ပြီးပါပြီ။ လက်ကျန်ငွေကြည့်ရန်နှင့် ပေးချေရန် ဤနေရာကို အချိန်မရွေး အသုံးပြုနိုင်ပါသည်။",
 }
 
 KM = {
@@ -84,6 +90,8 @@ KM = {
     "complaint_received": "យើងបានទទួលពាក្យបណ្តឹងរបស់អ្នក (លេខយោង {complaint_ref})។ អ្នកគ្រប់គ្រងម្នាក់មកពី {lender_name} នឹងទាក់ទងអ្នកក្នុងរយៈពេល {sla_hours} ម៉ោង។",
     "opt_out_confirmation": "អ្នកនឹងមិនទទួលសារពី {lender_name} តាម Telegram ទៀតទេ។ ដើម្បីទាក់ទងយើង សូមហៅទៅ {lender_phone} ឬនិយាយជាមួយមន្ត្រីឥណទានរបស់អ្នក។",
     "telegram_invite": "{lender_name}៖ មើលសមតុល្យប្រាក់កម្ចី និងបង់ប្រាក់តាម Telegram។ ចុចដើម្បីភ្ជាប់៖ {invite_link}",
+    "optin_request": "សូមស្វាគមន៍មកកាន់ {lender_name}។ ដើម្បីភ្ជាប់ប្រាក់កម្ចីរបស់អ្នក សូមចុចប៊ូតុងខាងក្រោមដើម្បីចែករំលែកលេខទូរស័ព្ទ។ យើងនឹងផ្ញើសារតែអំពីប្រាក់កម្ចីរបស់អ្នក ចន្លោះម៉ោង ៨ ព្រឹក ដល់ ៧ ល្ងាច។",
+    "optin_done": "សូមអរគុណ {borrower_name}។ ប្រាក់កម្ចីរបស់អ្នកជាមួយ {lender_name} ត្រូវបានភ្ជាប់ហើយ។ អ្នកអាចមើលសមតុល្យ និងបង់ប្រាក់នៅទីនេះបានគ្រប់ពេល។",
 }
 
 BUTTONS = {
@@ -91,7 +99,7 @@ BUTTONS = {
     "my": {"pay": "ချေးငွေကြည့်ရန်", "promise": "ပေးမည့်ရက်", "cant_pay": "မပေးနိုင်ပါ"},
     "km": {"pay": "បើកប្រាក់កម្ចីខ្ញុំ", "promise": "ខ្ញុំនឹងបង់នៅ...", "cant_pay": "ខ្ញុំមិនអាចបង់បាន"},
 }
-WITH_BUTTONS = {"pre_due_reminder", "due_day_reminder", "late_3_days", "late_7_days", "promise_reminder",
+WITH_BUTTONS = {"optin_done", "pre_due_reminder", "due_day_reminder", "late_3_days", "late_7_days", "promise_reminder",
                 "promise_broken", "plan_offer", "visit_notice"}
 
 

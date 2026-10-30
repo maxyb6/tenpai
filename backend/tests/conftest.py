@@ -1,9 +1,14 @@
 import os
 from datetime import date
 
-from app.config import TEST_DATABASE_URL
+# Point the app at the test database BEFORE anything imports app.config: the
+# engine reads DATABASE_URL at import time, and the fixtures drop every table.
+os.environ["DATABASE_URL"] = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql+psycopg://tenpai:tenpai@localhost:5432/tenpai_test")
 
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+from app.config import DATABASE_URL  # noqa: E402
+
+assert DATABASE_URL.endswith("_test"), f"refusing to run tests against {DATABASE_URL}"
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402

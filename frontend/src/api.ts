@@ -33,6 +33,12 @@ export const api = {
       headers: headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(body ?? {}),
     }).then(handle<T>),
+  put: <T,>(path: string, body?: unknown) =>
+    fetch(t(path), {
+      method: "PUT",
+      headers: headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body ?? {}),
+    }).then(handle<T>),
   upload: <T,>(path: string, form: FormData) =>
     fetch(t(path), { method: "POST", headers: headers(), body: form }).then(handle<T>),
   url: (path: string) => t(path),

@@ -1,2 +1,3 @@
-{"name": "Field visits", "short_name": "Field", "start_url": "/field", "display": "standalone",
- "background_color": "#E6EAE3", "theme_color": "#2F3E46", "icons": []}
+{"name": "Field visits", "short_name": "Visits", "start_url": "/field", "scope": "/", "display": "standalone",
+ "background_color": "#E6EAE3", "theme_color": "#2F3E46",
+ "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]}

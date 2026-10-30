@@ -362,6 +362,18 @@ def case_action(case_id: int, action: str, body: ActionBody, c: Ctx = Depends(ct
     return result
 
 
+@router.get("/cases/{case_id}/optin")
+def optin_link(case_id: int, c: Ctx = Depends(ctx)):
+    """Deep link + QR an officer shows the borrower to opt in on Telegram."""
+    from app.config import TELEGRAM_BOT_TOKEN
+    from app.payments.provider import qr_png_b64
+
+    case = _case_or_404(c, case_id)
+    token = links.make_token(c.tenant.id, case.borrower_id, case.id, clock.now(c.tenant).timestamp())
+    url = links.telegram_start_link(c.tenant.brand.get("bot_username", "lender_bot"), token)
+    return {"url": url, "qr_png": qr_png_b64(url), "live": bool(TELEGRAM_BOT_TOKEN)}
+
+
 @router.get("/files/{path:path}")
 def file(path: str, c: Ctx = Depends(ctx)):
     p = (ROOT / path).resolve()
