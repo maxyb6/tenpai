@@ -121,3 +121,36 @@ def test_control_assignment_is_recorded_as_event(seeded_mm, session):
     case = session.scalars(select(Case).where(Case.tenant_id == "mm-demo").limit(1)).one()
     ev = session.scalars(select(Event).where(Event.case_id == case.id, Event.type == "control_assigned")).one()
     assert ev.payload["arm"] == case.arm and ev.payload["stratum"] == case.stratum
+
+
+def test_renamed_columns_import_via_mapping(seeded_mm, session, tmp_path):
+    """A non-Mifos file: the suggester finds what it can, the user maps the rest."""
+    from app.ingest.canonical import FIELDS_BY_KIND
+
+    world = generator.generate("MM", AS_OF)
+    path = mifos_export.write_other(world, tmp_path)
+    headers, _ = pipeline.read_table(path.read_bytes(), path.name)
+    suggested = pipeline.suggest_mapping(headers, "loans")
+    assert suggested["loan_external_id"] == "Acct No" or suggested["loan_external_id"] is None
+    mapping = {k: v for k, v in mifos_export.OTHER_HEADERS.items()}
+    required = {f.key for f in FIELDS_BY_KIND["loans"] if f.required}
+    assert required <= set(mapping)
+    tenant = session.get(Tenant, "mm-demo")
+    out = pipeline.import_files(session, tenant, {"loans": (path.name, path.read_bytes())},
+                                mappings={"loans": mapping}, as_of=AS_OF)
+    assert out["batches"]["loans"]["accepted"] == 1500
+    assert out["cases"]["opened"] == 0  # same book, different file layout
+
+
+def test_unmapped_columns_do_not_blank_existing_values(seeded_mm, session, tmp_path):
+    from app.models import Loan
+
+    world = generator.generate("MM", AS_OF)
+    path = mifos_export.write_other(world, tmp_path)
+    tenant = session.get(Tenant, "mm-demo")
+    before = session.scalars(select(Loan).where(Loan.tenant_id == "mm-demo", Loan.appraisal.is_not(None))).first()
+    rate, appraisal, local = before.interest_rate_annual, before.appraisal, before.loan_cycle
+    pipeline.import_files(session, tenant, {"loans": (path.name, path.read_bytes())},
+                          mappings={"loans": dict(mifos_export.OTHER_HEADERS)}, as_of=AS_OF)
+    session.refresh(before)
+    assert (before.interest_rate_annual, before.appraisal, before.loan_cycle) == (rate, appraisal, local)

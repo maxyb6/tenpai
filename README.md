@@ -19,7 +19,11 @@ pip install -r backend/requirements.txt
 make migrate && make seed && make dev
 ```
 
-API on http://localhost:8000 (`/docs` for the OpenAPI UI).
+Console on http://localhost:5173, API on http://localhost:8000 (`/docs` for the OpenAPI UI).
+Without Docker, run the frontend with `cd frontend && npm install && npm run dev`.
+
+Seed for a specific demo date: `make seed ARGS="--as-of 2026-11-05"`. The seed writes the
+sample Mifos exports to `sample_data/` and imports them through the real pipeline.
 
 ## Layout
 

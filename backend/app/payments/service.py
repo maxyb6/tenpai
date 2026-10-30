@@ -45,6 +45,28 @@ def outstanding_arrears(session: Session, loan: Loan) -> int:
     return max(0, loan.amount_overdue - paid)
 
 
+def active_plan_schedule(session: Session, loan: Loan) -> list:
+    """Unpaid periods of the newest Tenpai schedule version (an accepted plan)."""
+    from app.models import Schedule
+    from sqlalchemy import func as f
+
+    latest = session.scalar(select(f.max(Schedule.version)).where(Schedule.loan_id == loan.id)) or 1
+    if latest == 1:
+        return []
+    return list(session.scalars(select(Schedule).where(
+        Schedule.loan_id == loan.id, Schedule.version == latest, Schedule.paid_amount < Schedule.total_due)
+        .order_by(Schedule.instalment_no)))
+
+
+def amount_due_now(session: Session, loan: Loan) -> int:
+    """What a "pay now" button should ask for: the next plan instalment when a
+    plan is active, otherwise the arrears."""
+    periods = active_plan_schedule(session, loan)
+    if periods:
+        return periods[0].total_due - periods[0].paid_amount
+    return outstanding_arrears(session, loan)
+
+
 def receive(session: Session, tenant: Tenant, p: PaymentIn, provider: str = "mock") -> Payment:
     now = clock.now(tenant)
     existing = session.scalars(select(Payment).where(Payment.provider == provider,
@@ -99,6 +121,16 @@ def match(session: Session, tenant: Tenant, pay: Payment, loan_id: int, method: 
          borrower_id=loan.borrower_id,
          payload={"payment_id": pay.id, "method": method, "amount": pay.amount, "kind": pay.kind,
                   "arrears_before": due, "arrears_after": max(0, due - pay.amount)})
+    # Allocate against an active plan's schedule, oldest period first.
+    remaining = pay.amount
+    for period in active_plan_schedule(session, loan):
+        if remaining <= 0:
+            break
+        take = min(remaining, period.total_due - period.paid_amount)
+        period.paid_amount += take
+        remaining -= take
+        if period.paid_amount >= period.total_due:
+            period.paid_on = pay.paid_at.date()
     if case:
         case.collected_amount += pay.amount
         _resolve_promises(session, tenant, case, now)

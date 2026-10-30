@@ -92,7 +92,7 @@ def _plan_view(p: Plan, lang: str) -> dict:
 
 def _state(s, tenant, borrower, case, lang):
     loan = _loan(s, borrower, case)
-    arrears = pay_svc.outstanding_arrears(s, loan) if loan else 0
+    arrears = pay_svc.amount_due_now(s, loan) if loan else 0
     plans = []
     if case:
         plans = [p for p in s.scalars(select(Plan).where(Plan.case_id == case.id).order_by(Plan.id))
@@ -149,7 +149,7 @@ def pay(token: str, body: PayBody):
     s, tenant, borrower, case = _open(token)
     try:
         loan = _loan(s, borrower, case)
-        amount = body.amount or pay_svc.outstanding_arrears(s, loan) or loan.instalment_amount
+        amount = body.amount or pay_svc.amount_due_now(s, loan) or loan.instalment_amount
         req, out = pay_svc.create_request(s, tenant, loan, case, amount, actor="borrower")
         s.commit()
         return {"reference": req.reference, "amount": _money(amount, loan.currency, borrower.language),

@@ -88,3 +88,32 @@ def write(world: World, out_dir: Path) -> dict[str, Path]:
             txn = {**r, "txn_type": r["txn_type"].capitalize()}
             w.writerow(_cell(k, txn.get(k), cur, MONEY_SAVINGS) for k in MIFOS_SAVINGS)
     return paths
+
+
+# A non-Mifos export: renamed columns, different order, dd/mm/yyyy dates.
+OTHER_HEADERS = {
+    "loan_external_id": "Acct No", "client_external_id": "Customer ID", "client_name": "Customer Name",
+    "phone": "Contact No", "branch": "Branch Name", "officer": "Field Officer", "product": "Product Name",
+    "currency": "CCY", "disbursed_on": "Date Disbursed", "principal_disbursed": "Loan Amount",
+    "principal_outstanding": "OLP", "principal_overdue": "Overdue Principal", "interest_overdue": "Overdue Interest",
+    "days_overdue": "DPD", "group_name": "Centre/Group", "village": "Ward/Village", "instalment_amount": "EMI",
+    "frequency": "Freq", "savings_balance": "Compulsory Savings",
+}
+
+
+def write_other(world: World, out_dir: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"other_core_banking_export_{world.market.lower()}.csv"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(OTHER_HEADERS.values())
+        for r in world.loans:
+            row = []
+            for k in OTHER_HEADERS:
+                v = r.get(k)
+                if isinstance(v, date):
+                    row.append(v.strftime("%d/%m/%Y"))
+                else:
+                    row.append(_cell(k, v, r["currency"], MONEY_LOAN))
+            w.writerow(row)
+    return path

@@ -212,6 +212,8 @@ def map_rows(rows, mapping, kind, report: Report, currency_for=None) -> list[tup
         ok = True
         for f in fields:
             col = mapping.get(f.key)
+            if not col and not f.required:
+                continue  # unmapped: leave whatever the record already has
             value = raw.get(col) if col else None
             try:
                 rec[f.key] = parse_value(f, value, currency)
@@ -246,7 +248,8 @@ def anonymise_loan_row(tenant_id: str, rec: dict) -> dict:
     rec = dict(rec)
     if rec.get("client_name"):
         rec["client_name"] = "Client " + _h(tenant_id, rec["client_name"])[:8]
-    rec["client_name_local"] = None
+    if "client_name_local" in rec:
+        rec["client_name_local"] = None
     if rec.get("phone"):
         rec["phone"] = "anon:" + _h(tenant_id, rec["phone"])[:12]
     if rec.get("national_id"):
@@ -278,9 +281,9 @@ def validate_loans(mapped: list[tuple[int, dict]], as_of: date, report: Report) 
         if future:
             report.add(row_no, "future_date", "error", f"{', '.join(future)} after {as_of.isoformat()}", lid)
             continue
-        if not rec.get("phone"):
+        if "phone" in rec and not rec.get("phone"):
             report.add(row_no, "missing_phone", "warning", "no mobile number", lid)
-        if rec.get("days_overdue") is not None and rec["days_overdue"] < 0:
+        if rec["days_overdue"] < 0:
             rec["days_overdue"] = 0
         accepted.append(rec)
     return accepted
@@ -335,13 +338,14 @@ def upsert_loans(session: Session, tenant: Tenant, records: list[dict], batch: I
             session.add(b)
             existing_borrowers[b.external_id] = b
         b.name = rec["client_name"]
-        b.name_local = rec.get("client_name_local")
-        b.gender = (rec.get("gender") or "")[:1].upper() or None
-        b.phone = rec.get("phone")
-        b.national_id = rec.get("national_id")
-        b.village = rec.get("village")
+        for attr, key in (("name_local", "client_name_local"), ("phone", "phone"), ("national_id", "national_id"),
+                          ("village", "village")):
+            if key in rec:
+                setattr(b, attr, rec[key])
+        if "gender" in rec:
+            b.gender = (rec.get("gender") or "")[:1].upper() or None
         b.branch_id = branch.id
-        b.officer_id = officer.id if officer else None
+        b.officer_id = officer.id if officer else b.officer_id
         b.anonymised = batch.anonymised
         session.flush()
 
@@ -353,36 +357,45 @@ def upsert_loans(session: Session, tenant: Tenant, records: list[dict], batch: I
             existing_loans[loan.external_id] = loan
         before = None if is_new else (loan.days_overdue, loan.principal_outstanding, loan.principal_overdue,
                                       loan.interest_overdue)
-        appraisal = None
-        if rec.get("household_income") is not None:
-            appraisal = {k: rec.get(k) for k in ("household_income", "household_expenses", "other_debt_repayments")}
+        def keep(attr, key=None, default=None, obj=None):
+            """Mapped value if the file has the column, else the current value."""
+            key = key or attr
+            target = obj if obj is not None else loan
+            if key in rec:
+                value = rec[key] if rec[key] is not None else default
+            else:
+                value = getattr(target, attr, None)
+                value = default if value is None else value
+            setattr(target, attr, value)
+
+        if "household_income" in rec:
+            loan.appraisal = None if rec.get("household_income") is None else {
+                k: rec.get(k) for k in ("household_income", "household_expenses", "other_debt_repayments")}
         loan.borrower_id = b.id
-        loan.group_id = group.id if group else None
+        loan.group_id = group.id if group else (loan.group_id if "group_name" not in rec else None)
         loan.branch_id = branch.id
-        loan.officer_id = officer.id if officer else None
+        loan.officer_id = officer.id if officer else loan.officer_id
         loan.product = rec["product"]
-        loan.loan_type = "group" if group else "individual"
+        loan.loan_type = "group" if loan.group_id else "individual"
         loan.currency = rec["currency"]
         loan.principal_disbursed = rec["principal_disbursed"]
         loan.disbursed_on = rec["disbursed_on"]
-        loan.interest_rate_annual = rec.get("interest_rate_annual") or 0.0
-        loan.term_instalments = rec.get("term_instalments") or 0
-        loan.frequency = _normalise_frequency(rec.get("frequency"))
-        loan.instalment_amount = rec.get("instalment_amount") or 0
-        loan.loan_cycle = rec.get("loan_cycle") or 1
+        keep("interest_rate_annual", default=0.0)
+        keep("term_instalments", default=0)
+        if "frequency" in rec or loan.frequency is None:
+            loan.frequency = _normalise_frequency(rec.get("frequency"))
+        keep("instalment_amount", default=0)
+        keep("loan_cycle", default=1)
         loan.principal_outstanding = rec["principal_outstanding"]
-        loan.interest_outstanding = rec.get("interest_outstanding") or 0
+        keep("interest_outstanding", default=0)
         loan.principal_overdue = rec["principal_overdue"]
-        loan.interest_overdue = rec.get("interest_overdue") or 0
-        loan.penalty_overdue = rec.get("penalty_overdue") or 0
+        keep("interest_overdue", default=0)
+        keep("penalty_overdue", default=0)
         loan.days_overdue = rec["days_overdue"]
         loan.arrears_as_of = rec.get("arrears_as_of") or batch.as_of
-        loan.next_due_date = rec.get("next_due_date")
-        loan.last_repayment_date = rec.get("last_repayment_date")
-        loan.last_repayment_amount = rec.get("last_repayment_amount")
-        loan.savings_account_no = rec.get("savings_account_no")
-        loan.savings_balance = rec.get("savings_balance")
-        loan.appraisal = appraisal
+        for k in ("next_due_date", "last_repayment_date", "last_repayment_amount", "savings_account_no",
+                  "savings_balance"):
+            keep(k)
         loan.status = "active"
         loan.import_batch_id = batch.id
         loan.raw = {k: (v.isoformat() if isinstance(v, date) else v) for k, v in rec.items()}

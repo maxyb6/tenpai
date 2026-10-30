@@ -118,7 +118,7 @@ def simulate_payment(body: PayBody, c: Ctx = Depends(ctx)):
         if req is None:
             case = s.get(Case, body.case_id)
             loan = s.get(Loan, case.loan_id)
-            req, _ = pay_svc.create_request(s, t, loan, case, pay_svc.outstanding_arrears(s, loan), actor=c.actor)
+            req, _ = pay_svc.create_request(s, t, loan, case, pay_svc.amount_due_now(s, loan), actor=c.actor)
     if req is None and not body.unmatched:
         raise HTTPException(400, "no payment request to pay")
     loan = s.get(Loan, req.loan_id) if req else None

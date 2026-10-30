@@ -24,5 +24,15 @@ services:
       db: {condition: service_healthy}
     volumes: [./sample_data:/app/sample_data]
 
+  web:
+    image: node:22-slim
+    working_dir: /app
+    command: sh -c "npm ci && npx vite --host 0.0.0.0 --port 5173"
+    environment:
+      API_URL: http://api:8000
+    ports: ["5173:5173"]
+    volumes: [./frontend:/app, /app/node_modules]
+    depends_on: [api]
+
 volumes:
   pgdata:

@@ -1,68 +1,18 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
-}
+html, body, #root { height: 100%; }
+body { background: #E6EAE3; color: #2F3E46; font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+table.data { width: 100%; border-collapse: collapse; }
+table.data th { text-align: left; font-weight: 600; color: #52796F; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .03em; padding: 6px 8px; border-bottom: 1px solid #CAD2C5; background: #F7F8F5; position: sticky; top: 0; }
+table.data td { padding: 6px 8px; border-bottom: 1px solid #EDF0EA; vertical-align: top; }
+table.data tr.clickable:hover td { background: #F3F6F1; cursor: pointer; }
+.btn { @apply inline-flex items-center gap-1 rounded px-3 py-1.5 text-[13px] font-medium border border-sage-pale bg-white hover:bg-[#F3F6F1] disabled:opacity-50; }
+.btn-primary { @apply bg-green-slate text-white border-green-slate hover:bg-[#476A61]; }
+.btn-danger { @apply bg-danger text-white border-danger hover:opacity-90; }
+.card { @apply bg-white rounded-md border border-sage-pale; }
+.input { @apply border border-sage-pale rounded px-2 py-1 bg-white text-[13px]; }
+.local { font-family: "Noto Sans Myanmar", "Noto Sans Khmer", Inter, sans-serif; }

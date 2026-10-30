@@ -95,6 +95,8 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
 
     out_dir = SAMPLE_DATA_DIR if write_sample else SAMPLE_DATA_DIR / ".tmp"
     paths = mifos_export.write(world, out_dir)
+    if write_sample:
+        mifos_export.write_other(world, out_dir)
     files = {kind: (p.name, p.read_bytes()) for kind, p in paths.items()}
     # Scored after Telegram links exist (they are Tenpai state, not in the export).
     result = pipeline.import_files(session, tenant, files, actor="system:seed", as_of=as_of, score=False)
