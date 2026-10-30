@@ -3,12 +3,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import clock
-from app.api import cases, demo, mini, portfolio
+from app.api import admin, cases, demo, field, mini, payments, portfolio
 from app.db import get_session
 from app.models import Event, Tenant
 
 app = FastAPI(title="Tenpai Collections", version="0.2.0")
-for r in (portfolio.router, portfolio.sample_router, cases.router, mini.router, demo.router):
+for r in (portfolio.router, portfolio.sample_router, cases.router, mini.router, demo.router, payments.router,
+          field.router, admin.router):
     app.include_router(r)
 
 

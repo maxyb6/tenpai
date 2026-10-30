@@ -51,6 +51,13 @@ CHARTER = {
 }
 
 
+def _charter(tenant, lang):
+    custom = (tenant.brand.get("charter") or {}).get(lang)
+    if custom:
+        return custom
+    return [{"title": a, "body": b} for a, b in CHARTER.get(lang, CHARTER["en"])]
+
+
 def _open(token: str):
     try:
         tenant_id, borrower_id, case_id = links.read_token(token)
@@ -122,8 +129,8 @@ def _state(s, tenant, borrower, case, lang):
         "plans": [_plan_view(p, lang) for p in offered],
         "pending_plan": _plan_view(pending, lang) if pending else None,
         "active_plan": _plan_view(active, lang) if active else None,
-        "charter": [{"title": a, "body": b} for a, b in CHARTER.get(lang, CHARTER["en"])],
-        "charter_en": [{"title": a, "body": b} for a, b in CHARTER["en"]],
+        "charter": _charter(tenant, lang),
+        "charter_en": _charter(tenant, "en"),
         "can_contact": case is not None and case.arm == "treatment",
     }
 

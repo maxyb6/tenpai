@@ -56,6 +56,10 @@ class EventType(StrEnum):
     template_changed = "template_changed"
     brand_changed = "brand_changed"
     clock_advanced = "clock_advanced"
+    payment_reversed = "payment_reversed"
+    portfolio_snapshot = "portfolio_snapshot"
+    restructure_exported = "restructure_exported"
+    flag_reviewed = "flag_reviewed"
 
 
 def emit(

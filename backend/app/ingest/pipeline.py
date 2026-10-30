@@ -520,6 +520,33 @@ def _chunks(items, n):
 # Cases
 
 
+def open_case(session: Session, tenant: Tenant, loan: Loan, *, at: datetime, actor: str, days_overdue: int,
+              amount_overdue: int, principal_outstanding: int, branch_name: str, version: int, policy) -> Case:
+    bucket = policy_mod.bucket_for(policy, days_overdue)
+    stratum = stratum_key(bucket, branch_name)
+    arm, position = assign_arm(session, tenant.id, stratum, policy.control.share, policy.control.block_size)
+    case = Case(
+        tenant_id=tenant.id, loan_id=loan.id, borrower_id=loan.borrower_id, branch_id=loan.branch_id,
+        officer_id=loan.officer_id, status="open", state="new", opened_at=at, currency=loan.currency,
+        bucket_at_open=bucket, bucket=bucket, amount_overdue_at_open=amount_overdue,
+        principal_outstanding_at_open=principal_outstanding, arm=arm, stratum=stratum,
+        policy_version_at_open=version,
+    )
+    session.add(case)
+    session.flush()
+    common = {"tenant_id": tenant.id, "at": at, "actor": actor, "policy_version": version,
+              "case_id": case.id, "loan_id": loan.id, "borrower_id": loan.borrower_id}
+    emit(session, type=EventType.case_opened, payload={
+        "bucket": bucket, "days_overdue": days_overdue, "amount_overdue": amount_overdue,
+        "principal_outstanding": principal_outstanding, "currency": loan.currency,
+    }, **common)
+    emit(session, type=EventType.control_assigned, payload={
+        "arm": arm, "stratum": stratum, "position_in_stratum": position,
+        "share": policy.control.share, "block_size": policy.control.block_size,
+    }, **common)
+    return case
+
+
 def refresh_cases(session: Session, tenant: Tenant, at: datetime, actor: str = "system") -> dict:
     """Open a case for each newly overdue loan (assigning control/treatment),
     close cases whose loan is back to current, and keep buckets current."""
@@ -536,35 +563,21 @@ def refresh_cases(session: Session, tenant: Tenant, at: datetime, actor: str = "
         case = open_cases.get(loan.id)
         overdue = loan.days_overdue > 0 and loan.amount_overdue > 0
         if overdue and case is None:
-            bucket = policy_mod.bucket_for(policy, loan.days_overdue)
-            stratum = stratum_key(bucket, branch_names[loan.branch_id])
-            arm, position = assign_arm(session, tenant.id, stratum, policy.control.share, policy.control.block_size)
-            case = Case(
-                tenant_id=tenant.id, loan_id=loan.id, borrower_id=loan.borrower_id, branch_id=loan.branch_id,
-                officer_id=loan.officer_id, status="open", state="new", opened_at=at, currency=loan.currency,
-                bucket_at_open=bucket, bucket=bucket, amount_overdue_at_open=loan.amount_overdue,
-                principal_outstanding_at_open=loan.principal_outstanding, arm=arm, stratum=stratum,
-                policy_version_at_open=version,
-            )
-            session.add(case)
-            session.flush()
-            common = {"tenant_id": tenant.id, "at": at, "actor": actor, "policy_version": version,
-                      "case_id": case.id, "loan_id": loan.id, "borrower_id": loan.borrower_id}
-            emit(session, type=EventType.case_opened, payload={
-                "bucket": bucket, "days_overdue": loan.days_overdue, "amount_overdue": loan.amount_overdue,
-                "principal_outstanding": loan.principal_outstanding, "currency": loan.currency,
-            }, **common)
-            emit(session, type=EventType.control_assigned, payload={
-                "arm": arm, "stratum": stratum, "position_in_stratum": position,
-                "share": policy.control.share, "block_size": policy.control.block_size,
-            }, **common)
+            case = open_case(session, tenant, loan, at=at, actor=actor, days_overdue=loan.days_overdue,
+                             amount_overdue=loan.amount_overdue, principal_outstanding=loan.principal_outstanding,
+                             branch_name=branch_names[loan.branch_id], version=version, policy=policy)
+            arm = case.arm
             stats["opened"] += 1
             stats[arm] += 1
         elif case is not None and not overdue:
+            # Cured per the core system: whatever arrears remained were paid outside Tenpai.
+            paid_outside = max(0, case.amount_overdue_at_open - case.collected_amount)
+            case.collected_amount += paid_outside
             case.status, case.state, case.close_reason, case.closed_at = "closed", "closed", "cured", at
             emit(session, tenant_id=tenant.id, type=EventType.case_closed, at=at, actor=actor,
                  policy_version=version, case_id=case.id, loan_id=loan.id, borrower_id=loan.borrower_id,
-                 payload={"reason": "cured", "source": "import"})
+                 payload={"reason": "cured", "source": "import", "collected_outside_tenpai": paid_outside,
+                          "collected": case.collected_amount})
             stats["closed_cured"] += 1
         elif case is not None:
             bucket = policy_mod.bucket_for(policy, loan.days_overdue)
@@ -592,6 +605,7 @@ def import_files(
     actor: str = "system",
     as_of: date | None = None,
     score: bool = True,
+    open_cases: bool = True,
 ) -> dict:
     """files: kind -> (filename, content). `loans` is required; `schedule` and
     `savings` are optional and enrich ranking signals."""
@@ -649,7 +663,8 @@ def import_files(
         b.report = rep.as_dict()
         result["batches"][kind] = {"id": b.id, **b.report}
 
-    result["cases"] = refresh_cases(session, tenant, at, actor)
+    result["cases"] = refresh_cases(session, tenant, at, actor) if open_cases else {
+        "opened": 0, "closed_cured": 0, "bucket_changed": 0, "control": 0, "treatment": 0}
     from app.domain.ranking import score_open_cases
 
     result["cases"]["scored"] = score_open_cases(session, tenant, actor) if score else 0

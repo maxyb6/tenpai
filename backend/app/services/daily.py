@@ -20,6 +20,31 @@ from app.models import Borrower, Case, Loan, Message, Promise, TelegramLink, Ten
 from app.services import cases as case_svc
 
 
+def sweep_promises(session: Session, tenant: Tenant, today, now, version: int, send: bool = True) -> tuple[int, int]:
+    broken = reminders = 0
+    for p in session.scalars(select(Promise).where(Promise.tenant_id == tenant.id, Promise.status == "open",
+                                                   Promise.due_date < today)):
+        case = session.get(Case, p.case_id)
+        p.status, p.resolved_at = ("partial" if case.collected_amount > 0 else "broken"), now
+        emit(session, tenant_id=tenant.id, type=EventType.ptp_broken, at=now, actor="system", policy_version=version,
+             case_id=case.id, loan_id=case.loan_id, borrower_id=case.borrower_id,
+             payload={"promise_id": p.id, "amount": p.amount, "due_date": p.due_date, "status": p.status})
+        broken += 1
+        if send and case.status == "open" and case.arm == "treatment":
+            msg.send(session, tenant, borrower=session.get(Borrower, case.borrower_id), case=case,
+                     key="promise_broken", at=now, extra={"promise_amount": p.amount, "promise_date": p.due_date})
+        if case.state == "promised":
+            case.state = "contacting"
+    for p in session.scalars(select(Promise).where(Promise.tenant_id == tenant.id, Promise.status == "open",
+                                                   Promise.due_date == today)):
+        case = session.get(Case, p.case_id)
+        if send and case.arm == "treatment" and case.status == "open":
+            msg.send(session, tenant, borrower=session.get(Borrower, case.borrower_id), case=case,
+                     key="promise_reminder", at=now, extra={"promise_amount": p.amount, "promise_date": p.due_date})
+            reminders += 1
+    return broken, reminders
+
+
 def run(session: Session, tenant: Tenant, actor: str = "system:scheduler") -> dict:
     version, policy = policy_mod.current(session, tenant)
     now = clock.now(tenant)
@@ -28,44 +53,16 @@ def run(session: Session, tenant: Tenant, actor: str = "system:scheduler") -> di
              "invites": 0, "reminders": 0, "pre_due": 0}
 
     # 1. Promises past their date and not kept.
-    for p in session.scalars(select(Promise).where(Promise.tenant_id == tenant.id, Promise.status == "open",
-                                                   Promise.due_date < today)):
-        case = session.get(Case, p.case_id)
-        p.status, p.resolved_at = ("partial" if case.collected_amount > 0 else "broken"), now
-        emit(session, tenant_id=tenant.id, type=EventType.ptp_broken, at=now, actor="system", policy_version=version,
-             case_id=case.id, loan_id=case.loan_id, borrower_id=case.borrower_id,
-             payload={"promise_id": p.id, "amount": p.amount, "due_date": p.due_date, "status": p.status})
-        stats["promises_broken"] += 1
-        if case.status == "open" and case.arm == "treatment":
-            msg.send(session, tenant, borrower=session.get(Borrower, case.borrower_id), case=case,
-                     key="promise_broken", at=now, extra={"promise_amount": p.amount, "promise_date": p.due_date})
-            case.state = "contacting"
-    for p in session.scalars(select(Promise).where(Promise.tenant_id == tenant.id, Promise.status == "open",
-                                                   Promise.due_date == today)):
-        case = session.get(Case, p.case_id)
-        if case.arm == "treatment":
-            msg.send(session, tenant, borrower=session.get(Borrower, case.borrower_id), case=case,
-                     key="promise_reminder", at=now, extra={"promise_amount": p.amount, "promise_date": p.due_date})
-            stats["promise_reminders"] += 1
+    stats["promises_broken"], stats["promise_reminders"] = sweep_promises(session, tenant, today, now, version)
 
     # 2. Messages rescheduled by the gate.
     stats["sent_scheduled"] = msg.process_due(session, tenant, actor)
-
-    # 3. Rescore and assign visits.
-    score_open_cases(session, tenant, actor)
-    open_cases = list(session.scalars(select(Case).where(Case.tenant_id == tenant.id, Case.status == "open")))
-    for case in open_cases:
-        if case.arm == "treatment" and case.segment == "visit" and case.state not in ("plan_pending", "plan_active"):
-            has = session.scalar(select(func.count(Visit.id)).where(Visit.case_id == case.id,
-                                                                    Visit.status == "assigned"))
-            if not has:
-                case_svc.assign_visit(session, tenant, case, actor=actor, notify=False)
-                stats["visits_assigned"] += 1
 
     # 4. Outreach per bucket strategy, treatment only.
     strategies = {s.bucket: s for s in policy.strategy}
     linked = set(session.scalars(select(TelegramLink.borrower_id).where(
         TelegramLink.tenant_id == tenant.id, TelegramLink.status == "active")))
+    open_cases = list(session.scalars(select(Case).where(Case.tenant_id == tenant.id, Case.status == "open")))
     for case in open_cases:
         if case.arm != "treatment" or case.automation_paused or case.segment in ("sensitive", "visit"):
             continue
@@ -98,6 +95,17 @@ def run(session: Session, tenant: Tenant, actor: str = "system:scheduler") -> di
             continue  # sent when a visit is assigned
         msg.send(session, tenant, borrower=borrower, case=case, key=key, at=now)
         stats["reminders"] += 1
+
+    # 3. Rescore and assign visits.
+    score_open_cases(session, tenant, actor)
+    open_cases = list(session.scalars(select(Case).where(Case.tenant_id == tenant.id, Case.status == "open")))
+    for case in open_cases:
+        if case.arm == "treatment" and case.segment == "visit" and case.state not in ("plan_pending", "plan_active"):
+            has = session.scalar(select(func.count(Visit.id)).where(Visit.case_id == case.id,
+                                                                    Visit.status == "assigned"))
+            if not has:
+                case_svc.assign_visit(session, tenant, case, actor=actor, notify=False)
+                stats["visits_assigned"] += 1
 
     # 5. Pre-due reminders for current loans (no case), Telegram-linked borrowers only.
     pre = strategies.get("pre_due")

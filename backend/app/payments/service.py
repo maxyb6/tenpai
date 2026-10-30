@@ -108,7 +108,10 @@ def match(session: Session, tenant: Tenant, pay: Payment, loan_id: int, method: 
     now = clock.now(tenant)
     loan = session.get(Loan, loan_id)
     case = session.scalars(select(Case).where(Case.loan_id == loan.id, Case.status == "open")).first()
-    due = outstanding_arrears(session, loan)
+    due = amount_due_now(session, loan)
+    if due == 0 and case is not None:
+        # Arrears already cleared in the core system: measure against the case.
+        due = max(0, case.amount_overdue_at_open - case.collected_amount)
     pay.loan_id, pay.case_id = loan.id, case.id if case else None
     pay.payment_request_id = request.id if request else None
     pay.match_status, pay.match_method = "matched", method
@@ -140,7 +143,8 @@ def match(session: Session, tenant: Tenant, pay: Payment, loan_id: int, method: 
         msg.send(session, tenant, borrower=borrower, case=case, key="payment_received", at=now, as_reply=True,
                  extra={"payment_amount": pay.amount, "payment_date": pay.paid_at.date(), "reference": pay.reference
                         or pay.external_txn_id})
-        if outstanding_arrears(session, loan) <= 0 and case.state != "plan_active":
+        if case.collected_amount >= case.amount_overdue_at_open and outstanding_arrears(session, loan) <= 0 \
+                and case.state != "plan_active":
             close_case(session, tenant, case, "cured", now, actor)
     return pay
 

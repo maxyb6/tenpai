@@ -16,11 +16,17 @@ TZ = ZoneInfo("Asia/Yangon")
 
 
 def _linked_treatment_case(session, n=0):
+    """An open treatment case with a clean slate: on Telegram, nothing paused or flagged."""
+    from app.models import Complaint, Flag
+
     linked = select(TelegramLink.borrower_id).where(TelegramLink.tenant_id == "mm-demo",
                                                     TelegramLink.status == "active")
-    return session.scalars(select(Case).where(Case.tenant_id == "mm-demo", Case.status == "open",
-                                              Case.arm == "treatment", Case.borrower_id.in_(linked))
-                           .order_by(Case.id).offset(n).limit(1)).one()
+    flagged = select(Flag.borrower_id).where(Flag.active.is_(True))
+    complained = select(Complaint.borrower_id)
+    return session.scalars(select(Case).where(
+        Case.tenant_id == "mm-demo", Case.status == "open", Case.arm == "treatment", Case.borrower_id.in_(linked),
+        Case.automation_paused.is_(False), Case.borrower_id.not_in(flagged), Case.borrower_id.not_in(complained))
+        .order_by(Case.id).offset(n).limit(1)).one()
 
 
 def _at(tenant, d: date, hh: int, mm: int = 0):
@@ -120,9 +126,15 @@ def test_banned_phrase_blocks(seeded_mm, session):
     tpl = session.scalars(select(Template).where(Template.tenant_id == "mm-demo", Template.key == "late_3_days",
                                                  Template.language == "en")).one()
     at = _at(tenant, date(2026, 11, 17), 10)
-    d = check(session, tenant, policy, version, borrower=borrower, case=case, template=tpl,
-              rendered="Pay now or the police will come", channel="telegram", at=at)
+    bad = Template(tenant_id=tpl.tenant_id, key=tpl.key, language="en", version=99, channel="telegram",
+                   body="Pay now or the police will come", variables=[], buttons=[], status="approved")
+    d = check(session, tenant, policy, version, borrower=borrower, case=case, template=bad,
+              rendered=bad.body, channel="telegram", at=at)
     assert not d.allowed and d.rule_id == "CR-11"
+    # A borrower's name that happens to contain a banned syllable never trips it.
+    ok = check(session, tenant, policy, version, borrower=borrower, case=case, template=tpl,
+               rendered="Hello Ko Ye ရဲ", channel="telegram", at=at)
+    assert all(t["result"] != "block" for t in ok.trace if t["rule"] == "CR-11")
 
 
 def test_seeded_templates_pass_banned_phrase_check(seeded_mm, session):

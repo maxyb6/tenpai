@@ -205,8 +205,9 @@ def check(
         hit = lr is not None and lr[0] == rid
         rule(rid, not hit, lr[1] if hit else "ok", exempted=hit and exempt)
 
-    # CR-11: banned phrases (also enforced when a template is approved).
-    lowered = rendered.lower()
+    # CR-11: banned phrases in the lender-approved text. Checked on the template,
+    # not the filled-in message, so a borrower's name can never trip it.
+    lowered = template.body.lower()
     banned = [p for lang in ("en", template.language) for p in policy.contact.banned_phrases.get(lang, [])
               if p.lower() in lowered]
     rule("CR-11", not banned, ", ".join(banned) if banned else "none")

@@ -163,6 +163,9 @@ def bulk(body: BulkBody, c: Ctx = Depends(ctx)):
             key = _reminder_for(c, case)
             m = msg.send(c.session, c.tenant, borrower=c.session.get(Borrower, case.borrower_id), case=case, key=key,
                          actor=c.actor)
+            if m is None:
+                out["results"].append({"case_id": cid, "status": "no_channel"})
+                continue
             out["results"].append({"case_id": cid, "status": m.status, "rule": m.gate_rule_id})
             out["blocked" if m.status == "blocked" else "done"] += 1
         elif body.action == "assign_visit":
@@ -325,6 +328,8 @@ def case_action(case_id: int, action: str, body: ActionBody, c: Ctx = Depends(ct
         raise HTTPException(403, "leadership is read-only")
     if action == "send_template":
         m = msg.send(s, t, borrower=borrower, case=case, key=body.template or _reminder_for(c, case), actor=c.actor)
+        if m is None:
+            raise HTTPException(400, "Borrower has no Telegram link; send the SMS invite or assign a visit")
         result = _message_dict(m)
     elif action == "log_call":
         case_svc.log_call(s, t, case, outcome=body.outcome or "spoke", note=body.note, actor=c.actor)

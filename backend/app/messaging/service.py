@@ -22,8 +22,8 @@ from app.models import Borrower, Case, Complaint, Flag, Loan, Message, Officer, 
 def template_for(session: Session, tenant: Tenant, key: str, language: str) -> Template:
     q = (select(Template).where(Template.tenant_id == tenant.id, Template.key == key,
                                 Template.language == language, Template.status != "retired")
-         .order_by(Template.version.desc()))
-    tpl = session.scalars(q).first()
+         .order_by((Template.status == "approved").desc(), Template.version.desc()))
+    tpl = session.scalars(q).first()  # newest approved version; a draft only if nothing is approved
     if tpl is None and language != "en":
         return template_for(session, tenant, key, "en")
     if tpl is None:
@@ -76,8 +76,13 @@ def render(body: str, variables: dict) -> str:
 
 def send(session: Session, tenant: Tenant, *, borrower: Borrower, case: Case | None, key: str,
          actor: str = "system", extra: dict | None = None, at: datetime | None = None,
-         as_reply: bool = False) -> Message:
+         as_reply: bool = False) -> Message | None:
+    """Returns None when the borrower has no channel for this template at all
+    (not on Telegram, never linked): there is nothing to plan or gate."""
     at = at or clock.now(tenant)
+    if key != "telegram_invite" and not session.scalar(
+            select(func.count(TelegramLink.id)).where(TelegramLink.borrower_id == borrower.id)):
+        return None
     loan = session.get(Loan, case.loan_id) if case else session.scalars(
         select(Loan).where(Loan.borrower_id == borrower.id, Loan.status == "active")).first()
     tpl = template_for(session, tenant, key, borrower.language)
@@ -239,7 +244,7 @@ def opt_out(session: Session, tenant: Tenant, borrower: Borrower, case: Case | N
 
 
 def receive_reply(session: Session, tenant: Tenant, borrower: Borrower, text: str, *, channel: str = "telegram",
-                  at: datetime | None = None, external_id: str | None = None) -> Message:
+                  at: datetime | None = None, external_id: str | None = None, score: bool = True) -> Message:
     at = at or clock.now(tenant)
     case = session.scalars(select(Case).where(Case.borrower_id == borrower.id, Case.status == "open")).first()
     norm_info = {}
@@ -285,7 +290,7 @@ def receive_reply(session: Session, tenant: Tenant, borrower: Borrower, text: st
         case.next_action = "Check payment received"
     elif c.label == "will_pay" and case:
         case.next_action = "Confirm promise date"
-    if case:
+    if case and score:
         from app.domain.ranking import score_open_cases
 
         score_open_cases(session, tenant, actor="system", case_ids=[case.id])

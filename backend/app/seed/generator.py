@@ -21,7 +21,7 @@ N_GROUPS = 120
 GROUP_SIZE = 5
 OFFICERS_PER_BRANCH = 4
 
-BUCKET_WEIGHTS = [((1, 7), 0.32), ((8, 30), 0.28), ((31, 60), 0.18), ((61, 90), 0.10), ((91, 240), 0.12)]
+BUCKET_WEIGHTS = [((1, 7), 0.32), ((8, 30), 0.30), ((31, 60), 0.08), ((61, 90), 0.05), ((91, 400), 0.25)]
 
 TENANTS = {
     "MM": {
@@ -96,6 +96,9 @@ class World:
     telegram: list[dict] = field(default_factory=list)
     # Extra rows that exist only in the CSV, to exercise validation.
     bad_rows: list[dict] = field(default_factory=list)
+    # 8 weeks of case history: openings in order, with the arm the real
+    # assignment will give them and the simulated outcome.
+    history: dict = field(default_factory=dict)
 
 
 def add_months(d: date, n: int) -> date:
@@ -203,7 +206,7 @@ def generate(market: str, as_of: date, seed: int = 7) -> World:
             acc += w
             if x <= acc:
                 return rng.randint(lo, hi)
-        return rng.randint(91, 240)
+        return rng.randint(91, 400)
 
     # --- group loans ---------------------------------------------------------
     gp = PRODUCTS[market]["group"]
@@ -219,7 +222,7 @@ def generate(market: str, as_of: date, seed: int = 7) -> World:
         first_due = as_of + timedelta(days=next_due_in) - timedelta(days=14 * last_due_idx)
         disbursed = first_due - timedelta(days=14)
         group_name = f"{village} Group {g + 1:03d}"
-        group_shock = rng.random() < 0.24
+        group_shock = rng.random() < 0.15
         for _ in range(GROUP_SIZE):
             principal = rng.randrange(lo, hi + 1, step) * MINOR[currency]
             if group_shock and rng.random() < 0.7:
@@ -245,7 +248,7 @@ def generate(market: str, as_of: date, seed: int = 7) -> World:
         product, currency, freq, terms, (lo, hi), step, rate = spec
         term = rng.choice(terms)
         principal = rng.randrange(lo, hi + 1, step) * MINOR[currency]
-        if rng.random() < 0.185:
+        if rng.random() < 0.12:
             days = draw_bucket_days()
             oldest_unpaid_due = as_of - timedelta(days=days)
             k = rng.randint(1, max(1, term - 1))
@@ -260,6 +263,7 @@ def generate(market: str, as_of: date, seed: int = 7) -> World:
         _make_loan(world, rng, next_ids(), person, b, officer, village, None, product, currency,
                    freq, term, principal, rate, first_due, disbursed, state)
 
+    _history(world, rng)
     _inject_quality_issues(world, rng)
     return world
 
@@ -447,3 +451,136 @@ def _inject_quality_issues(world: World, rng: random.Random):
     fut["client_external_id"] = fut["client_external_id"].replace("-C", "-C8")
     fut["disbursed_on"] = world.as_of + timedelta(days=12)
     world.bad_rows = [dup, neg, fut]
+
+
+# ---------------------------------------------------------------------------
+# History: 8 weeks of overdue episodes, decided together with the export so the
+# two never contradict each other.
+
+HISTORY_DAYS = 56
+EPISODE_RATE = 0.2
+DEEP_RATE = 0.1
+DEEP_CURE = {"treatment": (0.88, 42, 12.0), "control": (0.74, 46, 16.0)}
+# Simulated outcomes. Modest uplift: treatment cures a little more often and faster,
+# mostly for borrowers Tenpai can reach on Telegram.
+CURE = {("treatment", True): (0.93, 5.0), ("treatment", False): (0.88, 8.0), ("control", None): (0.85, 9.5)}
+
+
+def loan_state(row: dict, rows: list[dict], as_of: date) -> dict:
+    """Recompute a loan's arrears fields from its schedule as of a date."""
+    principal_paid = interest_paid = 0
+    last = (None, None)
+    for r in rows:
+        paid = r["paid_amount"]
+        if not paid:
+            continue
+        int_paid = min(paid, r["interest_due"])
+        interest_paid += int_paid
+        principal_paid += paid - int_paid
+        if r["paid_on"] and (last[0] is None or r["paid_on"] > last[0]):
+            last = (r["paid_on"], r["paid_amount"])
+    overdue_rows = [r for r in rows if r["due_date"] < as_of and r["paid_amount"] < r["total_due"]]
+    p_over = i_over = 0
+    for r in overdue_rows:
+        int_paid = min(r["paid_amount"], r["interest_due"])
+        i_over += r["interest_due"] - int_paid
+        p_over += r["principal_due"] - (r["paid_amount"] - int_paid)
+    future = [r for r in rows if r["paid_amount"] < r["total_due"] and r["due_date"] >= as_of]
+    return {
+        "principal_outstanding": row["principal_disbursed"] - principal_paid,
+        "interest_outstanding": sum(r["interest_due"] for r in rows) - interest_paid,
+        "principal_overdue": p_over, "interest_overdue": i_over,
+        "days_overdue": (as_of - overdue_rows[0]["due_date"]).days if overdue_rows else 0,
+        "next_due_date": future[0]["due_date"] if future else None,
+        "last_repayment_date": last[0] if last[0] else row["last_repayment_date"],
+        "last_repayment_amount": last[1] if last[0] else row["last_repayment_amount"],
+    }
+
+
+def _bucket(days: int) -> str:
+    from app.policy import DEFAULT_BUCKETS
+
+    for b in DEFAULT_BUCKETS:
+        if b.min_days >= 1 and days >= b.min_days and (b.max_days is None or days <= b.max_days):
+            return b.key
+    return "1_7"
+
+
+def _history(world: World, rng: random.Random) -> None:
+    from app.domain.control import block_layout, stratum_key
+    from app.policy import ControlGroup
+
+    as_of = world.as_of
+    t0 = as_of - timedelta(days=HISTORY_DAYS)
+    ctrl = ControlGroup()
+    sched: dict[str, list[dict]] = {}
+    for r in world.schedule:
+        sched.setdefault(r["loan_external_id"], []).append(r)
+    linked = {t["client_external_id"] for t in world.telegram}
+
+    openings = []
+    for loan in world.loans:
+        rows = sched[loan["loan_external_id"]]
+        if loan["days_overdue"] > 0:
+            first_unpaid = (as_of - timedelta(days=loan["days_overdue"]))
+            open_date = max(t0, first_unpaid + timedelta(days=1))
+            openings.append({"loan": loan["loan_external_id"], "kind": "overdue", "open_date": open_date,
+                             "first_unpaid": first_unpaid, "branch": loan["branch"],
+                             "linked": loan["client_external_id"] in linked})
+            continue
+        deep = [r for r in rows if t0 - timedelta(days=75) <= r["due_date"] <= t0 - timedelta(days=20)
+                and r["paid_on"] and r["paid_amount"] >= r["total_due"]]
+        if deep and rng.random() < DEEP_RATE:
+            # Went past 30 days, then recovered: what keeps a real book's PAR30 from only rising.
+            r = rng.choice(deep)
+            openings.append({"loan": loan["loan_external_id"], "kind": "episode", "deep": True,
+                             "open_date": max(t0, r["due_date"] + timedelta(days=1)), "first_unpaid": r["due_date"],
+                             "instalment_no": r["instalment_no"], "branch": loan["branch"],
+                             "linked": loan["client_external_id"] in linked})
+            continue
+        eligible = [r for r in rows if t0 < r["due_date"] <= as_of - timedelta(days=3) and r["paid_on"]
+                    and r["paid_amount"] >= r["total_due"]]
+        if eligible and rng.random() < EPISODE_RATE:
+            r = rng.choice(eligible)
+            openings.append({"loan": loan["loan_external_id"], "kind": "episode", "open_date": r["due_date"] + timedelta(days=1),
+                             "first_unpaid": r["due_date"], "instalment_no": r["instalment_no"],
+                             "branch": loan["branch"], "linked": loan["client_external_id"] in linked})
+    openings.sort(key=lambda o: (o["open_date"], o["loan"]))
+
+    positions: dict[str, int] = {}
+    loans_by_id = {l["loan_external_id"]: l for l in world.loans}
+    for o in openings:
+        o["days_at_open"] = (o["open_date"] - o["first_unpaid"]).days
+        o["bucket"] = _bucket(o["days_at_open"])
+        o["stratum"] = stratum_key(o["bucket"], o["branch"])
+        pos = positions.get(o["stratum"], 0)
+        positions[o["stratum"]] = pos + 1
+        o["arm"] = block_layout(world.tenant["id"], o["stratum"], pos // ctrl.block_size, ctrl.share,
+                                ctrl.block_size)[pos % ctrl.block_size]
+        if o["kind"] != "episode":
+            o["cure_date"] = None
+            continue
+        if o.get("deep"):
+            p, base, mean_days = DEEP_CURE[o["arm"]]
+            days = base + int(rng.expovariate(1 / mean_days))
+        else:
+            p, mean_days = CURE[(o["arm"], o["linked"])] if o["arm"] == "treatment" else CURE[("control", None)]
+            days = 2 + int(rng.expovariate(1 / mean_days))
+        cure = o["first_unpaid"] + timedelta(days=days)
+        loan = loans_by_id[o["loan"]]
+        rows = sched[o["loan"]]
+        if rng.random() < p and cure < as_of:
+            o["cure_date"] = cure
+            for r in rows:
+                if r["instalment_no"] >= o["instalment_no"] and r["due_date"] <= cure and r["paid_on"] \
+                        and r["paid_on"] < cure:
+                    r["paid_on"] = cure
+        else:
+            # Never cured: the loan is overdue in today's export.
+            o["cure_date"] = None
+            o["kind"] = "episode_uncured"
+            for r in rows:
+                if r["instalment_no"] >= o["instalment_no"] and r["due_date"] < as_of:
+                    r["paid_amount"], r["paid_on"] = 0, None
+        loan.update(loan_state(loan, rows, as_of))
+    world.history = {"t0": t0, "openings": openings}

@@ -43,6 +43,7 @@ from app.models import (
 )
 from app.messaging.templates_seed import seed_templates
 from app.seed import generator, mifos_export
+from app.seed.history import Replay
 
 # Children before parents.
 TENANT_TABLES = [
@@ -99,7 +100,9 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
         mifos_export.write_other(world, out_dir)
     files = {kind: (p.name, p.read_bytes()) for kind, p in paths.items()}
     # Scored after Telegram links exist (they are Tenpai state, not in the export).
-    result = pipeline.import_files(session, tenant, files, actor="system:seed", as_of=as_of, score=False)
+    # Cases are opened by the history replay, day by day, not by this import.
+    result = pipeline.import_files(session, tenant, files, actor="system:seed", as_of=as_of, score=False,
+                                   open_cases=False)
 
     # Staff details the loans file doesn't carry.
     branches = {b.name: b for b in session.scalars(select(Branch).where(Branch.tenant_id == tenant.id))}
@@ -144,6 +147,15 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
                                    "consent_text_version": "v1", "sample": True}})
     emit_many(session, events)
     session.flush()
-    result["cases"]["scored"] = score_open_cases(session, tenant, "system:seed")
+    Replay(session, tenant, world).run()
+    # The schedule export reflects the history (late payments on cured episodes).
+    if write_sample:
+        mifos_export.write(world, out_dir)
+    from sqlalchemy import func as f
+
+    result["cases"] = dict(session.execute(select(Case.arm, f.count()).where(
+        Case.tenant_id == tenant.id).group_by(Case.arm)).all())
+    result["cases"]["open"] = session.scalar(select(f.count(Case.id)).where(Case.tenant_id == tenant.id,
+                                                                            Case.status == "open"))
     return {"tenant": tenant.id, "as_of": as_of.isoformat(), "files": {k: str(p) for k, p in paths.items()},
             "import": result}
