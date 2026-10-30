@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app import policy as policy_mod
 from app.config import DATA_HOSTING_REGION, SAMPLE_DATA_DIR
 from app.events import EventType, emit_many
+from app.domain.ranking import score_open_cases
 from app.ingest import pipeline
 from app.models import (
     Approval,
@@ -40,6 +41,7 @@ from app.models import (
     User,
     Visit,
 )
+from app.messaging.templates_seed import seed_templates
 from app.seed import generator, mifos_export
 
 # Children before parents.
@@ -94,7 +96,8 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
     out_dir = SAMPLE_DATA_DIR if write_sample else SAMPLE_DATA_DIR / ".tmp"
     paths = mifos_export.write(world, out_dir)
     files = {kind: (p.name, p.read_bytes()) for kind, p in paths.items()}
-    result = pipeline.import_files(session, tenant, files, actor="system:seed", as_of=as_of)
+    # Scored after Telegram links exist (they are Tenpai state, not in the export).
+    result = pipeline.import_files(session, tenant, files, actor="system:seed", as_of=as_of, score=False)
 
     # Staff details the loans file doesn't carry.
     branches = {b.name: b for b in session.scalars(select(Branch).where(Branch.tenant_id == tenant.id))}
@@ -117,6 +120,9 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
             officer_id=officers[u["officer"]].id if u.get("officer") else None,
         ))
 
+    hoc = next(u["name"] for u in world.users if u["role"] == "head_of_collections")
+    seed_templates(session, tenant, now, approver=f"{hoc} (sample approver)")
+
     borrowers = {b.external_id: b for b in session.scalars(select(Borrower).where(Borrower.tenant_id == tenant.id))}
     events = []
     for link in world.telegram:
@@ -136,5 +142,6 @@ def seed_tenant(session: Session, market: str, as_of: date, write_sample: bool =
                                    "consent_text_version": "v1", "sample": True}})
     emit_many(session, events)
     session.flush()
+    result["cases"]["scored"] = score_open_cases(session, tenant, "system:seed")
     return {"tenant": tenant.id, "as_of": as_of.isoformat(), "files": {k: str(p) for k, p in paths.items()},
             "import": result}

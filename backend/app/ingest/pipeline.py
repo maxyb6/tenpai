@@ -578,6 +578,7 @@ def import_files(
     anonymise: bool = False,
     actor: str = "system",
     as_of: date | None = None,
+    score: bool = True,
 ) -> dict:
     """files: kind -> (filename, content). `loans` is required; `schedule` and
     `savings` are optional and enrich ranking signals."""
@@ -638,7 +639,7 @@ def import_files(
     result["cases"] = refresh_cases(session, tenant, at, actor)
     from app.domain.ranking import score_open_cases
 
-    result["cases"]["scored"] = score_open_cases(session, tenant, actor)
+    result["cases"]["scored"] = score_open_cases(session, tenant, actor) if score else 0
     emit(session, tenant_id=tenant.id, type=EventType.import_completed, at=at, actor=actor,
          policy_version=tenant.current_policy_version,
          payload={"as_of": as_of, "loans_batch_id": batch.id, "changes": stats, "cases": result["cases"],

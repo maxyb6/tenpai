@@ -51,6 +51,12 @@ class ContactRules(BaseModel):
             "manual_pause",
         ]
     )
+    # Replies to something the borrower just did (promise confirmation, payment
+    # receipt, complaint acknowledgement) skip quiet hours and frequency caps.
+    # They still stop on opt-out and deceased.
+    transactional_exempt_from_limits: bool = True
+    # Only one SMS (the Telegram invite) per case. SMS is for opt-in only.
+    max_sms_invites_per_case: int = 1
     third_party_contact_enabled: bool = False
     banned_phrases: dict[str, list[str]] = Field(default_factory=dict)
 
