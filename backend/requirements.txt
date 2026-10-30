@@ -1,0 +1,17 @@
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.6
+alembic==1.20.1
+psycopg[binary]==3.3.6
+pydantic==2.14.2
+apscheduler==3.11.3
+qrcode==8.2
+pillow==13.0.0
+weasyprint==70.0
+myanmartools==1.2.1
+# Not in the original stack list; needed for XLSX imports and FastAPI uploads.
+openpyxl==3.1.5
+python-multipart==0.0.32
+# Tests
+pytest==9.2.0
+httpx==0.28.1
