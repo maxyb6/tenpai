@@ -7,7 +7,11 @@ from app import policy as policy_mod
 from app.db import get_session
 from app.models import Borrower, Case, Event, Loan, SavingsTransaction, Schedule, TelegramLink, Tenant
 
+from app.api import portfolio
+
 app = FastAPI(title="Tenpai Collections", version="0.1.0")
+app.include_router(portfolio.router)
+app.include_router(portfolio.sample_router)
 
 
 def tenant_or_404(session: Session, tenant_id: str) -> Tenant:
