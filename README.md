@@ -7,10 +7,11 @@ data; all simulated results are labelled as simulated.
 ## Run
 
 ```bash
-cp .env.example .env
 docker compose up --build
-make seed                       # or: make seed ARGS="--as-of 2026-11-05"
 ```
+
+Open http://localhost:8000. On first start the sample data seeds itself (about 4 minutes; the page
+says so and refreshes). One image serves the console and the API.
 
 Without Docker (Postgres 16 running locally, Python 3.12):
 
@@ -96,3 +97,20 @@ number (recorded as unverified); on a real tenant it must.
   against the lender's Mifos version.
 - Burmese and Khmer scripts are drafts flagged "needs native review". Demo tenants may send them;
   a real tenant's send gate blocks them until a reviewer clears them in Settings.
+
+## Deploy (Render)
+
+`render.yaml` is a blueprint: one Docker web service plus Postgres 16, both in Singapore.
+
+1. In Render: **New → Blueprint**, connect GitHub, pick `maxyb6/tenpai`.
+2. When asked, set `DEMO_PASSWORD` (the console asks for it; any username). Optionally set
+   `DEMO_AS_OF` to the demo date and `TELEGRAM_BOT_TOKEN`.
+3. Apply. First deploy builds the image (about 5 minutes), then seeds (about 4 minutes).
+
+The blueprint uses paid plans (Starter web service, basic-256mb Postgres, roughly USD 13 a month):
+free web services sleep and take a minute to wake, and free databases expire after 30 days, which
+is the wrong risk for a live demo. Uploaded files (visit photos, agreement PDFs) live on the
+container's disk and are lost on redeploy; fine for a demo, not for a pilot.
+
+To refresh the dates before a demo: Demo menu → Reset demo tenant (about 2 minutes per tenant),
+or redeploy with a new `DEMO_AS_OF` after clearing the database.

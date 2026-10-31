@@ -8,8 +8,12 @@ const API = process.env.API ?? "http://localhost:8000";
 const SHOTS = process.argv[2] ?? "/tmp/tenpai-demo";
 const SAMPLE = path.resolve(__dirname, "../../sample_data");
 
-const j = async (p, opts) => {
-  const r = await fetch(API + p, opts);
+// If the deployment has a console password, send it (any username).
+const PASSWORD = process.env.DEMO_PASSWORD;
+const AUTH = PASSWORD ? { Authorization: "Basic " + Buffer.from(`demo:${PASSWORD}`).toString("base64") } : {};
+
+const j = async (p, opts = {}) => {
+  const r = await fetch(API + p, { ...opts, headers: { ...AUTH, ...(opts.headers ?? {}) } });
   if (!r.ok) throw new Error(`${p} ${r.status} ${await r.text()}`);
   return r.json();
 };
@@ -19,7 +23,9 @@ const post = (p, body, headers = {}) =>
 (async () => {
   require("fs").mkdirSync(SHOTS, { recursive: true });
   const b = await chromium.launch();
-  const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
+  const creds = PASSWORD ? { httpCredentials: { username: "demo", password: PASSWORD } } : {};
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 1000 }, ...creds });
+  const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   p.on("response", (r) => r.url().includes("/api/") && r.status() >= 500 && errors.push(`${r.status()} ${r.url()}`));
@@ -121,7 +127,8 @@ const post = (p, body, headers = {}) =>
   step(6, `advanced to ${adv.now}: ${run.reminders} reminders, ${run.visits_assigned} new visits (${visitsBefore} -> ${visitsAfter})`);
   const officerId = (await j("/api/t/mm-demo/field/manager")).officers.sort((a, b) => b.today_assigned - a.today_assigned)[0].officer_id;
   const officerUser = meta.users.find((u) => u.role === "credit_officer" && u.officer_id === officerId);
-  const m = await b.newPage({ viewport: { width: 360, height: 760 } });
+  const mctx = await b.newContext({ viewport: { width: 360, height: 760 }, ...creds });
+  const m = await mctx.newPage();
   m.on("pageerror", (e) => errors.push("officer " + e.message));
   await m.goto(`${WEB}/field`);
   await m.evaluate((u) => {
@@ -154,6 +161,14 @@ const post = (p, body, headers = {}) =>
   await p.waitForTimeout(1500);
   await shot("7-compliance");
   step(7, `reminder at 20:30: ${blocked.status} ${blocked.rule}; vulnerability reply: ${v.classification}`);
+
+  // Borrower links open without the console password.
+  const anon = await b.newPage({ viewport: { width: 360, height: 740 } });
+  const tok = (await j(`/api/t/mm-demo/cases/${pick.case.id}`)).mini_app_token;
+  const resp = await anon.goto(`${WEB}/m/${tok}`);
+  await anon.waitForTimeout(1500);
+  await anon.screenshot({ path: `${SHOTS}/7b-mini-app-no-password.png` });
+  step("7b", `borrower Mini App without password: HTTP ${resp.status()}`);
 
   // 8. Results.
   await p.goto(`${WEB}/results`);

@@ -5,8 +5,8 @@ up:
 	docker compose up --build
 
 seed:
-	@if docker compose ps -q api >/dev/null 2>&1 && [ -n "$$(docker compose ps -q api)" ]; then \
-		docker compose exec api python -m app.cli seed $(ARGS); \
+	@if docker compose ps -q app >/dev/null 2>&1 && [ -n "$$(docker compose ps -q app)" ]; then \
+		docker compose exec app python3.12 -m app.cli seed $(ARGS); \
 	else \
 		cd backend && python -m app.cli seed $(ARGS); \
 	fi

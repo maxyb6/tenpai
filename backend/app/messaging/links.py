@@ -7,7 +7,9 @@ import time
 
 from app.config import LINK_SIGNING_SECRET
 
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:5173")
+# Render sets RENDER_EXTERNAL_URL; locally the Vite dev server serves the console.
+PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+                   or "http://localhost:5173").rstrip("/")
 LINK_TTL_DAYS = 30
 
 
